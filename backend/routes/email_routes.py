@@ -123,7 +123,7 @@ async def delete_email(request: Request, db_session: database.DBSession, email_i
 @router.post("/fetch-emails")
 @limiter.limit("5/minute")
 async def start_fetch_emails(
-    request: Request, background_tasks: BackgroundTasks, user_id: str = Depends(validate_session)
+    request: Request, user_id: str = Depends(validate_session)
 ):
     """Starts the background task for fetching and processing emails."""
     
@@ -145,15 +145,16 @@ async def start_fetch_emails(
         logger.info(f"Starting email fetching process for user_id: {user_id}")
 
         # Start email fetching in the background
-        background_tasks.add_task(fetch_emails_to_db, user, request, user_id=user_id)
-
-        return JSONResponse(content={"message": "Email fetching started"}, status_code=200)
+        settings.background_tasks.add_task(fetch_emails_to_db, user, request, user_id=user_id)
+        response = JSONResponse(content={"message": "Email fetching started"}, status_code=200)
+        response.background = settings.background_tasks
+        return response
     except Exception as e:
         logger.error(f"Error reconstructing credentials: {e}")
         raise HTTPException(status_code=500, detail="Failed to authenticate user")
 
 
-def fetch_emails_to_db(user: AuthenticatedUser, request: Request, last_updated: Optional[datetime] = None, *, user_id: str) -> None:
+async def fetch_emails_to_db(user: AuthenticatedUser, request: Request, last_updated: Optional[datetime] = None, *, user_id: str) -> None:
     logger.info(f"Fetching emails to db for user_id: {user_id}")
 
     with Session(database.engine) as db_session:
@@ -193,7 +194,7 @@ def fetch_emails_to_db(user: AuthenticatedUser, request: Request, last_updated: 
             # this converts our date time to number of seconds 
             additional_time = int(last_updated.timestamp())
             # we append it to query so we get only emails recieved after however many seconds
-            # for example, if the newest email you’ve stored was received at 2025‑03‑20 14:32 UTC, we convert that to 1710901920s 
+            # for example, if the newest email you've stored was received at 2025‑03‑20 14:32 UTC, we convert that to 1710901920s 
             # and tell Gmail to fetch only messages received after March 20, 2025 at 14:32 UTC.
             if not start_date or not is_new_user:
                 query = QUERY_APPLIED_EMAIL_FILTER
@@ -226,7 +227,7 @@ def fetch_emails_to_db(user: AuthenticatedUser, request: Request, last_updated: 
         db_session.commit()
 
         email_records = []  # list to collect email records
-
+        relevant_emails = 0
         for idx, message in enumerate(messages):
             message_data = {}
             # (email_subject, email_from, email_domain, company_name, email_dt)
@@ -241,11 +242,23 @@ def fetch_emails_to_db(user: AuthenticatedUser, request: Request, last_updated: 
 
             if msg:
                 try:
-                    result = process_email(msg["text_content"])
+                    result = await process_email(
+                        request=request,
+                        email_text=msg["text_content"],
+                        message_id=msg_id,
+                        db_session=db_session,
+                        user_id=user_id,
+                    )
                     # if values are empty strings or null, set them to "unknown"
-                    for key in result.keys():
-                        if not result[key]:
-                            result[key] = "unknown"
+                    if result:
+                        for key in result.keys():
+                            if not result[key]:
+                                result[key] = "unknown"
+                    else:
+                        logger.error(
+                            f"user_id:{user_id} Error processing email {idx + 1} of {len(messages)} with id {msg_id}: No result returned"
+                        )
+                        result = {"company_name": "unknown", "application_status": "unknown", "job_title": "unknown"}
                 except Exception as e:
                     logger.error(
                         f"user_id:{user_id} Error processing email {idx + 1} of {len(messages)} with id {msg_id}: {e}"
@@ -259,7 +272,13 @@ def fetch_emails_to_db(user: AuthenticatedUser, request: Request, last_updated: 
                     logger.warning(
                         f"user_id:{user_id} failed to extract email {idx + 1} of {len(messages)} with id {msg_id}"
                     )
-                    result = {"company_name": "unknown", "application_status": "unknown", "job_title": "unknown"}
+
+                # Skip false positive emails
+                if result.get("application_status") == "False positive":
+                    logger.info(f"user_id:{user_id} Skipping false positive email with id {msg_id}")
+                    continue
+                else:
+                    relevant_emails += 1
 
                 message_data = {
                     "id": msg_id,
@@ -269,11 +288,14 @@ def fetch_emails_to_db(user: AuthenticatedUser, request: Request, last_updated: 
                     "subject": msg.get("subject", "unknown"),
                     "job_title": result.get("job_title", "unknown"),
                     "from": msg.get("from", "unknown"),
+                    "job_summary": result.get("job_summary", "")
                 }
                 email_record = create_user_email(user, message_data)
                 if email_record:
                     email_records.append(email_record)
-
+            if relevant_emails == 1:
+                break  # exit after processing 1 email with LLMs to avoid rate limiting
+            
         # batch insert all records at once
         if email_records:
             db_session.add_all(email_records)

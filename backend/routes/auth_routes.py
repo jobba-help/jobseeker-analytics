@@ -1,7 +1,7 @@
 import datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from google_auth_oauthlib.flow import Flow
 
 from db.utils.user_utils import user_exists
@@ -28,7 +28,7 @@ APP_URL = settings.APP_URL
 
 @router.get("/login")
 @limiter.limit("10/minute")
-async def login(request: Request, background_tasks: BackgroundTasks):
+async def login(request: Request):
     """Handles Google OAuth2 login and authorization code exchange."""
     code = request.query_params.get("code")
     flow = Flow.from_client_secrets_file(
@@ -87,7 +87,8 @@ async def login(request: Request, background_tasks: BackgroundTasks):
             response = RedirectResponse(
                 url=f"{settings.APP_URL}/processing", status_code=303
             )
-            background_tasks.add_task(fetch_emails_to_db, user, request, last_fetched_date, user_id=user.user_id)
+            settings.background_tasks.add_task(fetch_emails_to_db, user, request, last_fetched_date, user_id=user.user_id)
+            response.background = settings.background_tasks
             logger.info("Background task started for user_id: %s", user.user_id)
         else:
             request.session["is_new_user"] = True

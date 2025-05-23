@@ -48,7 +48,8 @@ def create_user_email(user, message_data: dict) -> UserEmails:
             received_at=received_at,
             subject=message_data["subject"],
             job_title=message_data["job_title"],
-            email_from=message_data["from"]
+            email_from=message_data["from"],
+            job_summary=message_data.get("job_summary", "")  # Add job_summary field with default empty string
         )
     except Exception as e:
         logger.error(f"Error creating UserEmail record: {e}")

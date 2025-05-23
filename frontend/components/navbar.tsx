@@ -84,7 +84,7 @@ export const Navbar = () => {
 					</Button>
 				</NavbarItem>
 				<NavbarItem>
-					{pathname === "/" || pathname.startsWith("/preview") ? (
+					{pathname === "/" ? (
 						<Tooltip
 							closeDelay={0}
 							color="foreground"

@@ -30,6 +30,7 @@ export interface Application {
 	job_title: string;
 	subject: string;
 	email_from: string;
+	job_summary: string;
 }
 
 interface JobApplicationsDashboardProps {
@@ -70,6 +71,8 @@ export default function JobApplicationsDashboard({
 	const [selectedDate, setSelectedDate] = useState<CalendarDate | null>(null);
 	const [isSaving, setIsSaving] = useState(false);
 	const [isNewUser, setIsNewUser] = useState(false);
+	const [showSummaryModal, setShowSummaryModal] = useState(false);
+	const [selectedSummary, setSelectedSummary] = useState<string>("");
 	const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 	const router = useRouter();
 	const [showDelete, setShowDelete] = useState(false);
@@ -315,6 +318,7 @@ export default function JobApplicationsDashboard({
 							<TableColumn>Job Title</TableColumn>
 							<TableColumn>Subject</TableColumn>
 							<TableColumn>Sender</TableColumn>
+							<TableColumn>Job Summary</TableColumn>
 							<TableColumn>Actions</TableColumn>
 						</TableHeader>
 						<TableBody>
@@ -339,6 +343,18 @@ export default function JobApplicationsDashboard({
 									<TableCell>{item.job_title || "--"}</TableCell>
 									<TableCell className="max-w-[300px] truncate">{item.subject || "--"}</TableCell>
 									<TableCell>{item.email_from || "--"}</TableCell>
+									<TableCell>
+										<Button
+											size="sm"
+											variant="light"
+											onPress={() => {
+												setSelectedSummary(item.job_summary || "No job summary available");
+												setShowSummaryModal(true);
+											}}
+										>
+											View Job Description
+										</Button>
+									</TableCell>
 									<TableCell className="text-center">
 										<Tooltip content="Remove">
 											<Button
@@ -369,6 +385,21 @@ export default function JobApplicationsDashboard({
 					Next
 				</Button>
 			</div>
+
+			{/* Job Summary Modal */}
+			<Modal isOpen={showSummaryModal} onOpenChange={setShowSummaryModal}>
+				<ModalContent>
+					<ModalHeader>Job Summary</ModalHeader>
+					<ModalBody>
+						<div className="whitespace-pre-wrap">{selectedSummary}</div>
+					</ModalBody>
+					<ModalFooter>
+						<Button color="primary" onPress={() => setShowSummaryModal(false)}>
+							Close
+						</Button>
+					</ModalFooter>
+				</ModalContent>
+			</Modal>
 		</div>
 	);
 }
